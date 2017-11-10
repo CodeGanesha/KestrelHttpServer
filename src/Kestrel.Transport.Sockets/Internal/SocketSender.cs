@@ -21,7 +21,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.Internal
         {
             _socket = socket;
             _eventArgs.UserToken = _awaitable;
-            _eventArgs.Completed += (_, e) => SendCompleted(e, (SocketAwaitable)e.UserToken);
+            _eventArgs.Completed += (_, e) => ((SocketAwaitable)e.UserToken).Complete(e.BytesTransferred, e.SocketError);
         }
 
         public SocketAwaitable SendAsync(ReadableBuffer buffers)
@@ -31,11 +31,16 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.Internal
                 return SendAsync(buffers.First);
             }
 
+            if (_eventArgs.Buffer != null)
+            {
+                _eventArgs.SetBuffer(null, 0, 0);
+            }
+
             _eventArgs.BufferList = GetBufferList(buffers);
 
             if (!_socket.SendAsync(_eventArgs))
             {
-                SendCompleted(_eventArgs, _awaitable);
+                _awaitable.Complete(_eventArgs.BytesTransferred, _eventArgs.SocketError);
             }
 
             return _awaitable;
@@ -45,11 +50,17 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.Internal
         {
             var segment = buffer.GetArray();
 
+            if (_eventArgs.BufferList != null)
+            {
+                _eventArgs.BufferList.Clear();
+                _eventArgs.BufferList = null;
+            }
+
             _eventArgs.SetBuffer(segment.Array, segment.Offset, segment.Count);
 
             if (!_socket.SendAsync(_eventArgs))
             {
-                SendCompleted(_eventArgs, _awaitable);
+                _awaitable.Complete(_eventArgs.BytesTransferred, _eventArgs.SocketError);
             }
 
             return _awaitable;
@@ -74,25 +85,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.Internal
             }
 
             return _bufferList;
-        }
-
-        private static void SendCompleted(SocketAsyncEventArgs e, SocketAwaitable awaitable)
-        {
-            // Clear buffer(s) to prevent the SetBuffer buffer and BufferList from both being
-            // set for the next write operation. This is unnecessary for reads since they never
-            // set BufferList.
-
-            if (e.BufferList != null)
-            {
-                e.BufferList.Clear();
-                e.BufferList = null;
-            }
-            else
-            {
-                e.SetBuffer(null, 0, 0);
-            }
-
-            awaitable.Complete(e.BytesTransferred, e.SocketError);
         }
     }
 }
